@@ -650,39 +650,33 @@ function canvasToGrid() {
     return 0.299 * px[i] + 0.587 * px[i+1] + 0.114 * px[i+2];
   }
 
-  // Step 1: Find bounding box of dark pixels directly on the canvas
-  let pxMinX = w, pxMaxX = 0, pxMinY = h, pxMaxY = 0;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (lum(x, y) < threshold) {
-        if (x < pxMinX) pxMinX = x;
-        if (x > pxMaxX) pxMaxX = x;
-        if (y < pxMinY) pxMinY = y;
-        if (y > pxMaxY) pxMaxY = y;
+  // Step 1: Determine reference frame
+  let pxMinX, pxMaxX, pxMinY, pxMaxY;
+
+  if (shapes.length > 0) {
+    // Shapes present: use full canvas as reference (WYSIWYG — preserves position & scale)
+    pxMinX = 0; pxMaxX = w - 1; pxMinY = 0; pxMaxY = h - 1;
+  } else {
+    // Freehand only: tight crop around content to maximize detail
+    pxMinX = w; pxMaxX = 0; pxMinY = h; pxMaxY = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (lum(x, y) < threshold) {
+          if (x < pxMinX) pxMinX = x;
+          if (x > pxMaxX) pxMaxX = x;
+          if (y < pxMinY) pxMinY = y;
+          if (y > pxMaxY) pxMaxY = y;
+        }
       }
     }
+    if (pxMaxX < pxMinX) return { lines: [], rows: 0, cols: 0 }; // empty
+    // Add 5% padding
+    const cW = pxMaxX - pxMinX + 1, cH = pxMaxY - pxMinY + 1;
+    const padX = Math.max(4, Math.floor(cW * 0.05));
+    const padY = Math.max(4, Math.floor(cH * 0.05));
+    pxMinX = Math.max(0, pxMinX - padX); pxMaxX = Math.min(w - 1, pxMaxX + padX);
+    pxMinY = Math.max(0, pxMinY - padY); pxMaxY = Math.min(h - 1, pxMaxY + padY);
   }
-
-  // Expand bounding box to include shape point coordinates
-  for (const shape of shapes) {
-    for (const pt of shape.points) {
-      const px_ = Math.round(pt.x), py_ = Math.round(pt.y);
-      if (px_ < pxMinX) pxMinX = px_;
-      if (px_ > pxMaxX) pxMaxX = px_;
-      if (py_ < pxMinY) pxMinY = py_;
-      if (py_ > pxMaxY) pxMaxY = py_;
-    }
-  }
-
-  if (pxMaxX < pxMinX) return { lines: [], rows: 0, cols: 0 }; // empty
-
-  // Add 5% padding around content (in pixel space)
-  const contentW = pxMaxX - pxMinX + 1;
-  const contentH = pxMaxY - pxMinY + 1;
-  const padX = Math.max(4, Math.floor(contentW * 0.05));
-  const padY = Math.max(4, Math.floor(contentH * 0.05));
-  pxMinX = Math.max(0, pxMinX - padX); pxMaxX = Math.min(w - 1, pxMaxX + padX);
-  pxMinY = Math.max(0, pxMinY - padY); pxMaxY = Math.min(h - 1, pxMaxY + padY);
 
   const bboxW = pxMaxX - pxMinX + 1;
   const bboxH = pxMaxY - pxMinY + 1;
