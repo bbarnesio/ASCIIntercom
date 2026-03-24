@@ -707,14 +707,38 @@ function canvasToGrid() {
     }
     for (const shape of shapes) {
       const pts = shape.points;
+      // Draw edges via Bresenham
       for (let i = 0; i < pts.length; i++) {
         const a = pts[i], b = pts[(i + 1) % pts.length];
-        // Map canvas coords to grid coords
         const gr0 = (a.y - pxMinY) / cellPxH;
         const gc0 = (a.x - pxMinX) / cellPxW;
         const gr1 = (b.y - pxMinY) / cellPxH;
         const gc1 = (b.x - pxMinX) / cellPxW;
         bresenham(gr0, gc0, gr1, gc1);
+      }
+      // Filled mode: flood-fill interior using ray-casting point-in-polygon
+      if (mode === 'filled') {
+        // Map shape points to grid coordinates for the hit test
+        const gridPts = pts.map(p => ({
+          x: (p.x - pxMinX) / cellPxW,
+          y: (p.y - pxMinY) / cellPxH
+        }));
+        for (let r = 0; r < outRows; r++) {
+          for (let c = 0; c < outCols; c++) {
+            if (!grid[r][c]) {
+              // Ray-casting: count edge crossings
+              let inside = false;
+              for (let i = 0, j = gridPts.length - 1; i < gridPts.length; j = i++) {
+                const yi = gridPts[i].y, xi = gridPts[i].x;
+                const yj = gridPts[j].y, xj = gridPts[j].x;
+                if (((yi > r) !== (yj > r)) && (c < (xj - xi) * (r - yi) / (yj - yi) + xi)) {
+                  inside = !inside;
+                }
+              }
+              if (inside) grid[r][c] = true;
+            }
+          }
+        }
       }
     }
   }
