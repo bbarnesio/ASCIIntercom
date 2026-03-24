@@ -265,13 +265,10 @@ function startStroke(e) {
   e.preventDefault(); isDrawing = true;
   const pos = getPos(e);
   currentStroke = { points: [pos], color: strokeColor, size: brushSize, smoothed: [] };
-  ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
   if (tool === 'erase') {
     ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
     ctx.strokeStyle = 'rgba(0,0,0,1)'; ctx.lineWidth = brushSize * 4;
-  } else {
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = strokeColor; ctx.lineWidth = brushSize * Math.max(0.5, pos.pressure);
   }
 }
 
@@ -279,8 +276,21 @@ function moveStroke(e) {
   if (!isDrawing) return; e.preventDefault();
   const pos = getPos(e);
   currentStroke.points.push(pos);
-  if (tool === 'draw') ctx.lineWidth = brushSize * Math.max(0.5, pos.pressure);
-  ctx.lineTo(pos.x, pos.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
+  if (tool === 'erase') {
+    ctx.lineTo(pos.x, pos.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
+  } else {
+    // Redraw all committed strokes + current stroke as one continuous path
+    // This avoids gaps between per-segment draws at small brush sizes
+    redraw();
+    const pts = currentStroke.points;
+    if (pts.length >= 2) {
+      ctx.beginPath(); ctx.strokeStyle = currentStroke.color;
+      ctx.lineWidth = Math.max(1.5, currentStroke.size); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+  }
 }
 
 function endStroke(e) {
@@ -289,6 +299,7 @@ function endStroke(e) {
   if (currentStroke && currentStroke.points.length > 1 && tool === 'draw') {
     currentStroke.smoothed = smoothStroke(currentStroke.points, smoothLevel);
     strokes.push(currentStroke);
+    redraw();
   }
   currentStroke = null; updateStatus();
 }
@@ -347,7 +358,7 @@ function redraw() {
     const pts = stroke.smoothed.length > 0 ? stroke.smoothed : stroke.points;
     if (pts.length < 2) continue;
     ctx.beginPath(); ctx.strokeStyle = stroke.color || '#231f20';
-    ctx.lineWidth = stroke.size || brushSize; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1.5, stroke.size || brushSize); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
