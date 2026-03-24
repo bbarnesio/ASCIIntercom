@@ -24,6 +24,7 @@
 
   body {
     background: #111;
+    transition: background-color 0.2s ease;
     color: #e0e0e0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     display: flex;
@@ -842,6 +843,7 @@ function exportAsciiSVG() {
 
   svg += '  </g>\n</svg>';
   downloadFile(svg, 'asciintercom-ascii.svg', 'image/svg+xml');
+  exportFlash();
   showToast('ASCII SVG exported');
 }
 
@@ -954,6 +956,7 @@ function exportAsciiAI() {
   const a = document.createElement('a');
   a.href = url; a.download = 'asciintercom-ascii.ai'; a.click();
   URL.revokeObjectURL(url);
+  exportFlash();
   showToast('ASCII .ai exported');
 }
 
@@ -965,6 +968,18 @@ function downloadFile(content, filename, type) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
+}
+
+// Export flash — random color from palette on each export
+const FLASH_COLORS = ['#ff5600', '#7a7fef', '#ff7ad5'];
+function exportFlash() {
+  const color = FLASH_COLORS[Math.floor(Math.random() * FLASH_COLORS.length)];
+  document.body.style.transition = 'background-color 0.2s ease';
+  document.body.style.backgroundColor = color;
+  setTimeout(() => {
+    document.body.style.transition = 'background-color 0.2s ease-out';
+    document.body.style.backgroundColor = '#111';
+  }, 3200);
 }
 
 function showToast(msg) {
