@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>ASCIIntercom</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>F</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #111;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px 16px;
+    overflow-x: hidden;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+
+  header h1 {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    color: #F4F3EC;
+    margin-bottom: 4px;
+  }
+
+  header p {
+    font-size: 12px;
+    color: #555;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 860px;
+  }
+
+  .toolbar .group {
+    display: flex;
+    gap: 4px;
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 4px;
+  }
+
+  .toolbar button {
+    background: transparent;
+    color: #999;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .toolbar button:hover { color: #e0e0e0; background: #2a2a2a; }
+  .toolbar button.active { background: #F4F3EC; color: #111; }
+  .toolbar button.danger:hover { background: #331111; color: #ff6666; }
+  .toolbar button.export-btn { color: #6faa6f; }
+  .toolbar button.export-btn:hover { background: #1a2e1a; color: #8fcc8f; }
+
+  .toolbar label {
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 8px;
+  }
+
+  .toolbar input[type="range"] {
+    width: 60px;
+    accent-color: #F4F3EC;
+    height: 3px;
+  }
+
+  .toolbar .val {
+    color: #999;
+    font-family: 'Courier New', monospace;
+    min-width: 14px;
+    text-align: center;
+  }
+
+  /* ── Canvas ── */
+  .canvas-wrap {
+    background: #F4F3EC;
+    border-radius: 4px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    position: relative;
+    touch-action: none;
+    max-width: 100%;
+  }
+
+  canvas {
+    display: block;
+    border-radius: 4px;
+    cursor: crosshair;
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* ── Status ── */
+  .status {
+    margin-top: 14px;
+    font-size: 11px;
+    color: #444;
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+
+  .status .sep { margin: 0 8px; }
+  .status kbd {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-family: 'Courier New', monospace;
+  }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #F4F3EC;
+    color: #111;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0;
+    transition: all 0.3s;
+    pointer-events: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── Color picker row ── */
+  .color-options {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 0 6px;
+  }
+
+  .color-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+
+  .color-dot:hover { transform: scale(1.15); }
+  .color-dot.active { border-color: #F4F3EC; }
+
+  /* ── Mobile tweaks ── */
+  @media (max-width: 600px) {
+    body { padding: 12px 8px; }
+    header h1 { font-size: 20px; letter-spacing: 4px; }
+    .toolbar { gap: 6px; }
+    .toolbar button { padding: 6px 10px; font-size: 11px; }
+    .toolbar input[type="range"] { width: 45px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ASCIINTERCOM</h1>
+  <p>Draw. Export. ASCII.</p>
+</header>
+
+<div class="toolbar">
+  <div class="group">
+    <button id="btnDraw" class="active" onclick="setTool('draw')">Draw</button>
+    <button id="btnErase" onclick="setTool('erase')">Erase</button>
+  </div>
+
+  <div class="group">
+    <label>
+      Size
+      <input type="range" id="brushSize" min="1" max="24" value="4" oninput="updateBrush()">
+      <span class="val" id="brushLabel">4</span>
+    </label>
+    <label>
+      Smooth
+      <input type="range" id="smoothing" min="0" max="5" value="3" oninput="updateSmoothing()">
+      <span class="val" id="smoothLabel">3</span>
+    </label>
+  </div>
+
+  <div class="color-options">
+    <div class="color-dot active" style="background:#231f20;" onclick="setColor('#231f20', this)" title="Black"></div>
+    <div class="color-dot" style="background:#484743;" onclick="setColor('#484743', this)" title="Charcoal"></div>
+    <div class="color-dot" style="background:#9E9E9E;" onclick="setColor('#9E9E9E', this)" title="Gray"></div>
+    <div class="color-dot" style="background:#0055CC;" onclick="setColor('#0055CC', this)" title="Blue"></div>
+  </div>
+
+  <div class="group">
+    <button onclick="undo()">Undo</button>
+    <button class="danger" onclick="clearCanvas()">Clear</button>
+  </div>
+
+  <div class="group">
+    <button class="export-btn" onclick="exportSVG()">Export SVG</button>
+    <button class="export-btn" onclick="exportPNG()">Export PNG</button>
+  </div>
+</div>
+
+<div class="canvas-wrap">
+  <canvas id="pad" width="840" height="1188"></canvas>
+</div>
+
+<div class="status">
+  <span id="strokeCount">0</span> strokes
+  <span class="sep">/</span>
+  <span id="pointCount">0</span> pts
+  <span class="sep">/</span>
+  A3 ratio
+  <span class="sep">/</span>
+  <kbd>D</kbd> draw
+  <kbd>E</kbd> erase
+  <kbd>Cmd+Z</kbd> undo
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const canvas = document.getElementById('pad');
+const ctx = canvas.getContext('2d');
+
+// ── State ──
+let strokes = [];
+let currentStroke = null;
+let tool = 'draw';
+let brushSize = 4;
+let smoothLevel = 3;
+let strokeColor = '#231f20';
+let isDrawing = false;
+
+// ── Init ──
+ctx.fillStyle = '#F4F3EC';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.lineCap = 'round';
+ctx.lineJoin = 'round';
+
+// ── Coordinate mapping ──
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  let clientX, clientY, pressure = 0.5;
+
+  if (e.touches && e.touches.length > 0) {
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+    pressure = e.touches[0].force || 0.5;
+  } else {
+    clientX = e.clientX;
+    clientY = e.clientY;
+    pressure = e.pressure || 0.5;
+  }
+
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY,
+    pressure: pressure
+  };
+}
+
+// ── Drawing ──
+function startStroke(e) {
+  e.preventDefault();
+  isDrawing = true;
+  const pos = getPos(e);
+  currentStroke = { points: [pos], color: strokeColor, size: brushSize, smoothed: [] };
+
+  ctx.beginPath();
+  ctx.moveTo(pos.x, pos.y);
+
+  if (tool === 'erase') {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.strokeStyle = 'rgba(0,0,0,1)';
+    ctx.lineWidth = brushSize * 4;
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = brushSize * Math.max(0.5, pos.pressure);
+  }
+}
+
+function moveStroke(e) {
+  if (!isDrawing) return;
+  e.preventDefault();
+  const pos = getPos(e);
+  currentStroke.points.push(pos);
+
+  if (tool === 'draw') {
+    ctx.lineWidth = brushSize * Math.max(0.5, pos.pressure);
+  }
+
+  ctx.lineTo(pos.x, pos.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(pos.x, pos.y);
+}
+
+function endStroke(e) {
+  if (!isDrawing) return;
+  e.preventDefault();
+  isDrawing = false;
+  ctx.globalCompositeOperation = 'source-over';
+
+  if (currentStroke && currentStroke.points.length > 1 && tool === 'draw') {
+    currentStroke.smoothed = smoothStroke(currentStroke.points, smoothLevel);
+    strokes.push(currentStroke);
+  }
+  currentStroke = null;
+  updateStatus();
+}
+
+// ── Events ──
+canvas.addEventListener('pointerdown', startStroke);
+canvas.addEventListener('pointermove', moveStroke);
+canvas.addEventListener('pointerup', endStroke);
+canvas.addEventListener('pointerleave', endStroke);
+canvas.addEventListener('pointercancel', endStroke);
+
+// Prevent touch scrolling on canvas
+canvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+// ── Smoothing ──
+function smoothStroke(points, level) {
+  if (level === 0 || points.length < 3) {
+    return points.map(p => ({ x: p.x, y: p.y }));
+  }
+
+  let pts = points;
+  if (pts.length > 500) {
+    const step = Math.ceil(pts.length / 500);
+    pts = pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
+  }
+
+  let smoothed = pts.map(p => ({ x: p.x, y: p.y }));
+  for (let iter = 0; iter < level; iter++) {
+    const next = [smoothed[0]];
+    for (let i = 1; i < smoothed.length - 1; i++) {
+      next.push({
+        x: smoothed[i].x * 0.5 + (smoothed[i-1].x + smoothed[i+1].x) * 0.25,
+        y: smoothed[i].y * 0.5 + (smoothed[i-1].y + smoothed[i+1].y) * 0.25,
+      });
+    }
+    next.push(smoothed[smoothed.length - 1]);
+    smoothed = next;
+  }
+  return smoothed;
+}
+
+function catmullRomToBezier(p0, p1, p2, p3, tension) {
+  const t = tension || 0.3;
+  return {
+    cp1: { x: p1.x + (p2.x - p0.x) * t, y: p1.y + (p2.y - p0.y) * t },
+    cp2: { x: p2.x - (p3.x - p1.x) * t, y: p2.y - (p3.y - p1.y) * t },
+    end: p2
+  };
+}
+
+// ── Tools ──
+function setTool(t) {
+  tool = t;
+  document.getElementById('btnDraw').classList.toggle('active', t === 'draw');
+  document.getElementById('btnErase').classList.toggle('active', t === 'erase');
+  canvas.style.cursor = t === 'erase' ? 'cell' : 'crosshair';
+}
+
+function setColor(hex, el) {
+  strokeColor = hex;
+  document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function updateBrush() {
+  brushSize = parseInt(document.getElementById('brushSize').value);
+  document.getElementById('brushLabel').textContent = brushSize;
+}
+
+function updateSmoothing() {
+  smoothLevel = parseInt(document.getElementById('smoothing').value);
+  document.getElementById('smoothLabel').textContent = smoothLevel;
+}
+
+function clearCanvas() {
+  strokes = [];
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#F4F3EC';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  updateStatus();
+}
+
+function undo() {
+  if (strokes.length === 0) return;
+  strokes.pop();
+  redraw();
+  updateStatus();
+}
+
+function redraw() {
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#F4F3EC';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (const stroke of strokes) {
+    const pts = stroke.smoothed.length > 0 ? stroke.smoothed : stroke.points;
+    if (pts.length < 2) continue;
+    ctx.beginPath();
+    ctx.strokeStyle = stroke.color || '#231f20';
+    ctx.lineWidth = stroke.size || brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
+    ctx.stroke();
+  }
+}
+
+function updateStatus() {
+  const totalPts = strokes.reduce((sum, s) => sum + s.points.length, 0);
+  document.getElementById('strokeCount').textContent = strokes.length;
+  document.getElementById('pointCount').textContent = totalPts;
+}
+
+// ── Export SVG ──
+function exportSVG() {
+  if (strokes.length === 0) { showToast('Draw something first'); return; }
+
+  const w = canvas.width, h = canvas.height;
+  let paths = '';
+
+  for (const stroke of strokes) {
+    const pts = stroke.smoothed.length > 0 ? stroke.smoothed : stroke.points;
+    if (pts.length < 2) continue;
+
+    let d = `M ${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
+
+    if (pts.length === 2) {
+      d += ` L ${pts[1].x.toFixed(2)},${pts[1].y.toFixed(2)}`;
+    } else {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[Math.max(0, i - 1)];
+        const p1 = pts[i];
+        const p2 = pts[Math.min(pts.length - 1, i + 1)];
+        const p3 = pts[Math.min(pts.length - 1, i + 2)];
+        const bez = catmullRomToBezier(p0, p1, p2, p3, 0.3);
+        d += ` C ${bez.cp1.x.toFixed(2)},${bez.cp1.y.toFixed(2)} ${bez.cp2.x.toFixed(2)},${bez.cp2.y.toFixed(2)} ${bez.end.x.toFixed(2)},${bez.end.y.toFixed(2)}`;
+      }
+    }
+
+    const sw = stroke.size || brushSize;
+    const sc = stroke.color || '#231f20';
+    paths += `  <path d="${d}" fill="none" stroke="${sc}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>\n`;
+  }
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 ${w} ${h}" width="${w}px" height="${h}px">
+${paths}</svg>`;
+
+  downloadFile(svg, 'asciintercom-drawing.svg', 'image/svg+xml');
+  showToast('SVG exported');
+}
+
+// ── Export PNG ──
+function exportPNG() {
+  if (strokes.length === 0) { showToast('Draw something first'); return; }
+  canvas.toBlob(function(blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'asciintercom-drawing.png';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('PNG exported');
+  });
+}
+
+// ── Helpers ──
+function downloadFile(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ── Keyboard shortcuts ──
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'z' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); undo(); }
+  if (e.key === 'd') setTool('draw');
+  if (e.key === 'e') setTool('erase');
+});
+</script>
+
+</body>
+</html>
