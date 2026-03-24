@@ -486,7 +486,8 @@ function undo() {
   redraw(); updateStatus();
 }
 
-function redraw() {
+function redraw(showHandles) {
+  if (showHandles === undefined) showHandles = true;
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -513,7 +514,7 @@ function redraw() {
   }
 
   // Draw control point handles when in select mode
-  if (tool === 'select') {
+  if (showHandles && tool === 'select') {
     for (const shape of shapes) {
       for (const pt of shape.points) {
         ctx.beginPath();
@@ -566,9 +567,13 @@ function canvasToGrid() {
   const thickness = parseInt(document.getElementById('asciiThickness').value);
   const mode = document.getElementById('asciiMode').value;
 
+  // Clean redraw without anchor point handles before sampling
+  redraw(false);
   const w = canvas.width, h = canvas.height;
   const imageData = ctx.getImageData(0, 0, w, h);
   const px = imageData.data;
+  // Restore handles after capturing pixels
+  redraw(true);
 
   // Helper: luminance at pixel (x, y)
   function lum(x, y) {
