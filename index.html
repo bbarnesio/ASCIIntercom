@@ -719,33 +719,7 @@ function canvasToGrid() {
     }
   }
 
-  // Apply weight — omnidirectional dilation
-  // Weight 1 = hairline (no dilation), each step adds 1 cell of expansion
-  const dilateN = thickness - 1;
-  if (dilateN > 0) {
-    const dilated = grid.map(row => [...row]);
-    for (let r = 0; r < outRows; r++) {
-      for (let c = 0; c < outCols; c++) {
-        if (grid[r][c]) {
-          for (let dr = -dilateN; dr <= dilateN; dr++) {
-            for (let dc = -dilateN; dc <= dilateN; dc++) {
-              const nr = r + dr, nc = c + dc;
-              if (nr >= 0 && nr < outRows && nc >= 0 && nc < outCols) {
-                dilated[nr][nc] = true;
-              }
-            }
-          }
-        }
-      }
-    }
-    for (let r = 0; r < outRows; r++) {
-      for (let c = 0; c < outCols; c++) {
-        grid[r][c] = dilated[r][c];
-      }
-    }
-  }
-
-  // Outline mode: keep only border cells
+  // Outline mode: extract border cells first, then dilate
   if (mode === 'outline') {
     const outline = [];
     for (let r = 0; r < outRows; r++) {
@@ -763,10 +737,31 @@ function canvasToGrid() {
         outline[r][c] = isBorder;
       }
     }
-    return flowText(outline, outRows, outCols);
+    return flowText(dilateGrid(outline, outRows, outCols, thickness - 1), outRows, outCols);
   }
 
-  return flowText(grid, outRows, outCols);
+  return flowText(dilateGrid(grid, outRows, outCols, thickness - 1), outRows, outCols);
+}
+
+// Omnidirectional dilation helper
+function dilateGrid(grid, rows, cols, n) {
+  if (n <= 0) return grid;
+  const dilated = grid.map(row => [...row]);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (grid[r][c]) {
+        for (let dr = -n; dr <= n; dr++) {
+          for (let dc = -n; dc <= n; dc++) {
+            const nr = r + dr, nc = c + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+              dilated[nr][nc] = true;
+            }
+          }
+        }
+      }
+    }
+  }
+  return dilated;
 }
 
 function flowText(grid, rows, cols) {
@@ -809,6 +804,7 @@ function previewASCII() {
   // Apply style class
   const style = document.getElementById('asciiStyle').value;
   wrap.className = 'preview-wrap visible style-' + style;
+  exportFlash();
   showToast(result.lines.length + ' lines, ' + result.lines.reduce((s, l) => s + [...l].filter(c => c !== ' ').length, 0) + ' filled');
 }
 
