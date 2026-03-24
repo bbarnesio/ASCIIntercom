@@ -188,6 +188,10 @@
     <div class="color-dot" style="background:#0055CC;" onclick="setColor('#0055CC', this)" title="Blue"></div>
   </div>
   <div class="group">
+    <button onclick="document.getElementById('photoInput').click()" style="color:#8fb8de;">Photo</button>
+    <input type="file" id="photoInput" accept="image/*" style="display:none" onchange="loadPhoto(this)">
+  </div>
+  <div class="group">
     <button onclick="undo()">Undo</button>
     <button class="danger" onclick="clearCanvas()">Clear</button>
   </div>
@@ -471,6 +475,35 @@ function setColor(hex, el) {
 function updateBrush() { brushSize = parseInt(document.getElementById('brushSize').value); document.getElementById('brushLabel').textContent = brushSize; }
 function updateSmoothing() { smoothLevel = parseInt(document.getElementById('smoothing').value); document.getElementById('smoothLabel').textContent = smoothLevel; }
 
+function loadPhoto(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const img = new Image();
+  img.onload = function() {
+    // Clear existing content
+    strokes = []; shapes = []; actionHistory = []; dragState = null;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Scale image to fit canvas, maintaining aspect ratio
+    const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+    const w = img.width * scale;
+    const h = img.height * scale;
+    const x = (canvas.width - w) / 2;
+    const y = (canvas.height - h) / 2;
+    ctx.drawImage(img, x, y, w, h);
+
+    // Mark as having content so export checks pass
+    // Store as a special "photo" stroke so undo/status work
+    strokes.push({ points: [{x:0,y:0},{x:1,y:1}], color: '#000', size: 1, smoothed: [], isPhoto: true, imgData: ctx.getImageData(0, 0, canvas.width, canvas.height) });
+    actionHistory.push('stroke');
+    updateStatus();
+    showToast('Photo loaded — adjust Thresh and preview');
+    input.value = ''; // reset so same file can be re-selected
+  };
+  img.src = URL.createObjectURL(file);
+}
+
 function clearCanvas() {
   strokes = []; shapes = []; actionHistory = []; dragState = null;
   ctx.globalCompositeOperation = 'source-over';
@@ -491,8 +524,12 @@ function redraw(showHandles) {
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw freehand strokes
+  // Draw freehand strokes (and restore photos)
   for (const stroke of strokes) {
+    if (stroke.isPhoto) {
+      ctx.putImageData(stroke.imgData, 0, 0);
+      continue;
+    }
     const pts = stroke.smoothed.length > 0 ? stroke.smoothed : stroke.points;
     if (pts.length < 2) continue;
     ctx.beginPath(); ctx.strokeStyle = stroke.color || '#231f20';
