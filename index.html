@@ -611,11 +611,9 @@ function canvasToGrid() {
 
   if (outRows < 1) return { lines: [], rows: 0, cols: 0 };
 
-  // Step 3: Sample canvas pixels into the output grid
-  // Each output cell maps to a rectangular region of the bounding-box area.
-  // Use min-luminance detection: if ANY pixel in the cell is dark, fill it.
-  // This ensures thin strokes (1-3px) register even when they only cross a
-  // small fraction of the cell area — block-averaging would dilute them away.
+  // Step 3: Sample canvas pixels for freehand strokes
+  // Count dark pixels per cell — requires >= 2 dark pixels to fill.
+  // This filters single anti-aliased edge pixels while keeping thin strokes.
   const cellPxW = bboxW / outCols;
   const cellPxH = bboxH / outRows;
 
@@ -627,14 +625,44 @@ function canvasToGrid() {
     for (let c = 0; c < outCols; c++) {
       const srcX0 = Math.floor(pxMinX + c * cellPxW);
       const srcX1 = Math.min(Math.floor(pxMinX + (c + 1) * cellPxW), pxMaxX + 1);
-      let minLum = 255;
+      let darkCount = 0;
       for (let py = srcY0; py < srcY1; py++) {
         for (let ppx = srcX0; ppx < srcX1; ppx++) {
-          const l = lum(ppx, py);
-          if (l < minLum) minLum = l;
+          if (lum(ppx, py) < threshold) darkCount++;
         }
       }
-      grid[r][c] = minLum < threshold;
+      grid[r][c] = darkCount >= 2;
+    }
+  }
+
+  // Step 3b: Overlay shapes directly via Bresenham line rasterization
+  // Bypasses canvas pixel sampling for mathematically precise edges
+  if (shapes.length > 0) {
+    function bresenham(r0, c0, r1, c1) {
+      r0 = Math.round(r0); c0 = Math.round(c0);
+      r1 = Math.round(r1); c1 = Math.round(c1);
+      const dr = Math.abs(r1 - r0), dc = Math.abs(c1 - c0);
+      const sr = r0 < r1 ? 1 : -1, sc = c0 < c1 ? 1 : -1;
+      let err = dc - dr, r = r0, c = c0;
+      while (true) {
+        if (r >= 0 && r < outRows && c >= 0 && c < outCols) grid[r][c] = true;
+        if (r === r1 && c === c1) break;
+        const e2 = 2 * err;
+        if (e2 > -dr) { err -= dr; c += sc; }
+        if (e2 < dc) { err += dc; r += sr; }
+      }
+    }
+    for (const shape of shapes) {
+      const pts = shape.points;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        // Map canvas coords to grid coords
+        const gr0 = (a.y - pxMinY) / cellPxH;
+        const gc0 = (a.x - pxMinX) / cellPxW;
+        const gr1 = (b.y - pxMinY) / cellPxH;
+        const gc1 = (b.x - pxMinX) / cellPxW;
+        bresenham(gr0, gc0, gr1, gc1);
+      }
     }
   }
 
