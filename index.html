@@ -352,7 +352,8 @@ function onPointerDown(e) {
         const pt = shapes[si].points[pi];
         const dx = pos.x - pt.x, dy = pos.y - pt.y;
         if (dx * dx + dy * dy < HANDLE_RADIUS * HANDLE_RADIUS) {
-          dragState = { shapeIdx: si, pointIdx: pi, mode: 'point' };
+          dragState = { shapeIdx: si, pointIdx: pi, mode: 'point',
+            origPoints: shapes[si].points.map(p => ({ x: p.x, y: p.y })) };
           return;
         }
       }
@@ -395,7 +396,25 @@ function onPointerMove(e) {
   if (tool === 'select') {
     if (!dragState) return;
     if (dragState.mode === 'point') {
-      shapes[dragState.shapeIdx].points[dragState.pointIdx] = { x: pos.x, y: pos.y };
+      if (e.shiftKey) {
+        // Shift held: uniform scale around centroid
+        const orig = dragState.origPoints;
+        const cx = orig.reduce((s, p) => s + p.x, 0) / orig.length;
+        const cy = orig.reduce((s, p) => s + p.y, 0) / orig.length;
+        const origPt = orig[dragState.pointIdx];
+        const origDist = Math.hypot(origPt.x - cx, origPt.y - cy);
+        if (origDist > 1) {
+          const curDist = Math.hypot(pos.x - cx, pos.y - cy);
+          const scale = curDist / origDist;
+          const pts = shapes[dragState.shapeIdx].points;
+          for (let i = 0; i < pts.length; i++) {
+            pts[i].x = cx + (orig[i].x - cx) * scale;
+            pts[i].y = cy + (orig[i].y - cy) * scale;
+          }
+        }
+      } else {
+        shapes[dragState.shapeIdx].points[dragState.pointIdx] = { x: pos.x, y: pos.y };
+      }
     } else if (dragState.mode === 'move') {
       const dx = pos.x - dragState.startX, dy = pos.y - dragState.startY;
       const pts = shapes[dragState.shapeIdx].points;
@@ -529,7 +548,7 @@ function undo() {
   redraw(); updateStatus();
 }
 
-function redraw(showHandles) {
+function redraw(showHandles, skipShapes) {
   if (showHandles === undefined) showHandles = true;
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -550,19 +569,21 @@ function redraw(showHandles) {
     ctx.stroke();
   }
 
-  // Draw shapes as closed paths
-  for (const shape of shapes) {
-    const pts = shape.points;
-    if (pts.length < 2) continue;
-    ctx.beginPath(); ctx.strokeStyle = shape.color || '#231f20';
-    ctx.lineWidth = Math.max(1.5, shape.size || 2); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.closePath(); ctx.stroke();
+  // Draw shapes as closed paths (skip if sampling strokes only)
+  if (!skipShapes) {
+    for (const shape of shapes) {
+      const pts = shape.points;
+      if (pts.length < 2) continue;
+      ctx.beginPath(); ctx.strokeStyle = shape.color || '#231f20';
+      ctx.lineWidth = Math.max(1.5, shape.size || 2); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath(); ctx.stroke();
+    }
   }
 
   // Draw control point handles when in select mode
-  if (showHandles && tool === 'select') {
+  if (showHandles && !skipShapes && tool === 'select') {
     for (const shape of shapes) {
       for (const pt of shape.points) {
         ctx.beginPath();
@@ -615,12 +636,12 @@ function canvasToGrid() {
   const thickness = parseInt(document.getElementById('asciiThickness').value);
   const mode = document.getElementById('asciiMode').value;
 
-  // Clean redraw without anchor point handles before sampling
-  redraw(false);
+  // Redraw without handles and without shapes — sample only freehand strokes/photos
+  redraw(false, true);
   const w = canvas.width, h = canvas.height;
   const imageData = ctx.getImageData(0, 0, w, h);
   const px = imageData.data;
-  // Restore handles after capturing pixels
+  // Restore full canvas
   redraw(true);
 
   // Helper: luminance at pixel (x, y)
@@ -639,6 +660,17 @@ function canvasToGrid() {
         if (y < pxMinY) pxMinY = y;
         if (y > pxMaxY) pxMaxY = y;
       }
+    }
+  }
+
+  // Expand bounding box to include shape point coordinates
+  for (const shape of shapes) {
+    for (const pt of shape.points) {
+      const px_ = Math.round(pt.x), py_ = Math.round(pt.y);
+      if (px_ < pxMinX) pxMinX = px_;
+      if (px_ > pxMaxX) pxMaxX = px_;
+      if (py_ < pxMinY) pxMinY = py_;
+      if (py_ > pxMaxY) pxMaxY = py_;
     }
   }
 
@@ -688,17 +720,20 @@ function canvasToGrid() {
     }
   }
 
-  // Step 3b: Overlay shapes directly via Bresenham line rasterization
-  // Bypasses canvas pixel sampling for mathematically precise edges
+  // Step 3b: Build shape grid via Bresenham + ray-cast (exact mathematical scale)
+  // Kept separate from stroke grid so shapes aren't affected by dilation
+  const shapeGrid = [];
   if (shapes.length > 0) {
-    function bresenham(r0, c0, r1, c1) {
+    for (let r = 0; r < outRows; r++) shapeGrid[r] = new Array(outCols).fill(false);
+
+    function bresenham(target, r0, c0, r1, c1) {
       r0 = Math.round(r0); c0 = Math.round(c0);
       r1 = Math.round(r1); c1 = Math.round(c1);
       const dr = Math.abs(r1 - r0), dc = Math.abs(c1 - c0);
       const sr = r0 < r1 ? 1 : -1, sc = c0 < c1 ? 1 : -1;
       let err = dc - dr, r = r0, c = c0;
       while (true) {
-        if (r >= 0 && r < outRows && c >= 0 && c < outCols) grid[r][c] = true;
+        if (r >= 0 && r < outRows && c >= 0 && c < outCols) target[r][c] = true;
         if (r === r1 && c === c1) break;
         const e2 = 2 * err;
         if (e2 > -dr) { err -= dr; c += sc; }
@@ -714,19 +749,17 @@ function canvasToGrid() {
         const gc0 = (a.x - pxMinX) / cellPxW;
         const gr1 = (b.y - pxMinY) / cellPxH;
         const gc1 = (b.x - pxMinX) / cellPxW;
-        bresenham(gr0, gc0, gr1, gc1);
+        bresenham(shapeGrid, gr0, gc0, gr1, gc1);
       }
-      // Filled mode: flood-fill interior using ray-casting point-in-polygon
+      // Filled mode: fill interior using ray-casting point-in-polygon
       if (mode === 'filled') {
-        // Map shape points to grid coordinates for the hit test
         const gridPts = pts.map(p => ({
           x: (p.x - pxMinX) / cellPxW,
           y: (p.y - pxMinY) / cellPxH
         }));
         for (let r = 0; r < outRows; r++) {
           for (let c = 0; c < outCols; c++) {
-            if (!grid[r][c]) {
-              // Ray-casting: count edge crossings
+            if (!shapeGrid[r][c]) {
               let inside = false;
               for (let i = 0, j = gridPts.length - 1; i < gridPts.length; j = i++) {
                 const yi = gridPts[i].y, xi = gridPts[i].x;
@@ -735,7 +768,7 @@ function canvasToGrid() {
                   inside = !inside;
                 }
               }
-              if (inside) grid[r][c] = true;
+              if (inside) shapeGrid[r][c] = true;
             }
           }
         }
@@ -743,8 +776,12 @@ function canvasToGrid() {
     }
   }
 
-  // Outline mode: extract border cells first, then dilate
+  // Outline mode: merge grids, extract borders, dilate
   if (mode === 'outline') {
+    // Merge shape edges into stroke grid
+    for (let r = 0; r < outRows; r++)
+      for (let c = 0; c < outCols; c++)
+        if (shapeGrid[r] && shapeGrid[r][c]) grid[r][c] = true;
     const outline = [];
     for (let r = 0; r < outRows; r++) {
       outline[r] = [];
@@ -764,7 +801,12 @@ function canvasToGrid() {
     return flowText(dilateGrid(outline, outRows, outCols, thickness - 1), outRows, outCols);
   }
 
-  return flowText(dilateGrid(grid, outRows, outCols, thickness - 1), outRows, outCols);
+  // Filled mode: dilate strokes by weight, then merge shapes at exact scale
+  const dilated = dilateGrid(grid, outRows, outCols, thickness - 1);
+  for (let r = 0; r < outRows; r++)
+    for (let c = 0; c < outCols; c++)
+      if (shapeGrid[r] && shapeGrid[r][c]) dilated[r][c] = true;
+  return flowText(dilated, outRows, outCols);
 }
 
 // Omnidirectional dilation helper
