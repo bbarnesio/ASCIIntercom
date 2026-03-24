@@ -124,6 +124,10 @@
     padding: 1px 5px; font-size: 10px; font-family: 'Courier New', monospace;
   }
 
+  /* ── Shape buttons ── */
+  .toolbar button.shape-btn { color: #c9a84c; }
+  .toolbar button.shape-btn:hover { background: #2a2511; color: #e0c56a; }
+
   /* ── Toast ── */
   .toast {
     position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
@@ -153,6 +157,12 @@
   <div class="group">
     <button id="btnDraw" class="active" onclick="setTool('draw')">Draw</button>
     <button id="btnErase" onclick="setTool('erase')">Erase</button>
+    <button id="btnSelect" onclick="setTool('select')">Select</button>
+  </div>
+  <div class="group">
+    <button class="shape-btn" onclick="addShape('square')">Square</button>
+    <button class="shape-btn" onclick="addShape('circle')">Circle</button>
+    <button class="shape-btn" onclick="addShape('triangle')">Triangle</button>
   </div>
   <div class="group">
     <label>Size <input type="range" id="brushSize" min="1" max="24" value="4" oninput="updateBrush()"> <span class="val" id="brushLabel">4</span></label>
@@ -222,7 +232,7 @@
   <span class="sep">/</span>
   A3 ratio
   <span class="sep">/</span>
-  <kbd>D</kbd> draw <kbd>E</kbd> erase <kbd>Cmd+Z</kbd> undo <kbd>P</kbd> preview
+  <kbd>D</kbd> draw <kbd>E</kbd> erase <kbd>V</kbd> select <kbd>Cmd+Z</kbd> undo <kbd>P</kbd> preview
 </div>
 
 <div class="toast" id="toast"></div>
@@ -241,6 +251,12 @@ let brushSize = 4;
 let smoothLevel = 3;
 let strokeColor = '#231f20';
 let isDrawing = false;
+
+// Shape system
+let shapes = [];
+let actionHistory = []; // 'stroke' | 'shape' — tracks order for undo
+let dragState = null; // { shapeIdx, pointIdx } when dragging a control point
+const HANDLE_RADIUS = 10; // hit area for control points (canvas px)
 
 ctx.fillStyle = '#F4F3EC';
 ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -261,9 +277,61 @@ function getPos(e) {
   return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY, pressure };
 }
 
-function startStroke(e) {
-  e.preventDefault(); isDrawing = true;
+// ── Shape creation ──
+function addShape(type) {
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  let pts;
+  if (type === 'square') {
+    const s = 200;
+    pts = [
+      { x: cx - s, y: cy - s }, { x: cx + s, y: cy - s },
+      { x: cx + s, y: cy + s }, { x: cx - s, y: cy + s }
+    ];
+  } else if (type === 'triangle') {
+    const s = 220;
+    pts = [
+      { x: cx, y: cy - s },
+      { x: cx + s * Math.cos(Math.PI / 6), y: cy + s * Math.sin(Math.PI / 6) },
+      { x: cx - s * Math.cos(Math.PI / 6), y: cy + s * Math.sin(Math.PI / 6) }
+    ];
+  } else if (type === 'circle') {
+    const r = 200, n = 16;
+    pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    }
+  }
+  shapes.push({ type, points: pts, color: strokeColor });
+  actionHistory.push('shape');
+  setTool('select');
+  redraw();
+  updateStatus();
+}
+
+// ── Pointer events — routes to draw/erase or select ──
+function onPointerDown(e) {
+  e.preventDefault();
   const pos = getPos(e);
+
+  if (tool === 'select') {
+    // Check if clicking near a control point
+    for (let si = shapes.length - 1; si >= 0; si--) {
+      for (let pi = 0; pi < shapes[si].points.length; pi++) {
+        const pt = shapes[si].points[pi];
+        const dx = pos.x - pt.x, dy = pos.y - pt.y;
+        if (dx * dx + dy * dy < HANDLE_RADIUS * HANDLE_RADIUS) {
+          dragState = { shapeIdx: si, pointIdx: pi };
+          return;
+        }
+      }
+    }
+    dragState = null;
+    return;
+  }
+
+  // Draw / Erase mode
+  isDrawing = true;
   currentStroke = { points: [pos], color: strokeColor, size: brushSize, smoothed: [] };
   if (tool === 'erase') {
     ctx.globalCompositeOperation = 'destination-out';
@@ -272,15 +340,23 @@ function startStroke(e) {
   }
 }
 
-function moveStroke(e) {
-  if (!isDrawing) return; e.preventDefault();
+function onPointerMove(e) {
+  e.preventDefault();
   const pos = getPos(e);
+
+  if (tool === 'select') {
+    if (!dragState) return;
+    shapes[dragState.shapeIdx].points[dragState.pointIdx] = { x: pos.x, y: pos.y };
+    redraw();
+    return;
+  }
+
+  // Draw / Erase mode
+  if (!isDrawing) return;
   currentStroke.points.push(pos);
   if (tool === 'erase') {
     ctx.lineTo(pos.x, pos.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
   } else {
-    // Redraw all committed strokes + current stroke as one continuous path
-    // This avoids gaps between per-segment draws at small brush sizes
     redraw();
     const pts = currentStroke.points;
     if (pts.length >= 2) {
@@ -293,22 +369,31 @@ function moveStroke(e) {
   }
 }
 
-function endStroke(e) {
-  if (!isDrawing) return; e.preventDefault(); isDrawing = false;
+function onPointerUp(e) {
+  e.preventDefault();
+
+  if (tool === 'select') {
+    dragState = null;
+    return;
+  }
+
+  if (!isDrawing) return;
+  isDrawing = false;
   ctx.globalCompositeOperation = 'source-over';
   if (currentStroke && currentStroke.points.length > 1 && tool === 'draw') {
     currentStroke.smoothed = smoothStroke(currentStroke.points, smoothLevel);
     strokes.push(currentStroke);
+    actionHistory.push('stroke');
     redraw();
   }
   currentStroke = null; updateStatus();
 }
 
-canvas.addEventListener('pointerdown', startStroke);
-canvas.addEventListener('pointermove', moveStroke);
-canvas.addEventListener('pointerup', endStroke);
-canvas.addEventListener('pointerleave', endStroke);
-canvas.addEventListener('pointercancel', endStroke);
+canvas.addEventListener('pointerdown', onPointerDown);
+canvas.addEventListener('pointermove', onPointerMove);
+canvas.addEventListener('pointerup', onPointerUp);
+canvas.addEventListener('pointerleave', onPointerUp);
+canvas.addEventListener('pointercancel', onPointerUp);
 canvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
 canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 
@@ -331,7 +416,9 @@ function setTool(t) {
   tool = t;
   document.getElementById('btnDraw').classList.toggle('active', t === 'draw');
   document.getElementById('btnErase').classList.toggle('active', t === 'erase');
-  canvas.style.cursor = t === 'erase' ? 'cell' : 'crosshair';
+  document.getElementById('btnSelect').classList.toggle('active', t === 'select');
+  canvas.style.cursor = t === 'select' ? 'default' : t === 'erase' ? 'cell' : 'crosshair';
+  redraw();
 }
 function setColor(hex, el) {
   strokeColor = hex;
@@ -342,18 +429,25 @@ function updateBrush() { brushSize = parseInt(document.getElementById('brushSize
 function updateSmoothing() { smoothLevel = parseInt(document.getElementById('smoothing').value); document.getElementById('smoothLabel').textContent = smoothLevel; }
 
 function clearCanvas() {
-  strokes = []; ctx.globalCompositeOperation = 'source-over';
+  strokes = []; shapes = []; actionHistory = []; dragState = null;
+  ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   updateStatus(); hidePreview();
 }
 
 function undo() {
-  if (strokes.length === 0) return; strokes.pop(); redraw(); updateStatus();
+  if (actionHistory.length === 0) return;
+  const last = actionHistory.pop();
+  if (last === 'stroke') strokes.pop();
+  else if (last === 'shape') shapes.pop();
+  redraw(); updateStatus();
 }
 
 function redraw() {
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw freehand strokes
   for (const stroke of strokes) {
     const pts = stroke.smoothed.length > 0 ? stroke.smoothed : stroke.points;
     if (pts.length < 2) continue;
@@ -363,11 +457,36 @@ function redraw() {
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
   }
+
+  // Draw shapes as closed paths
+  for (const shape of shapes) {
+    const pts = shape.points;
+    if (pts.length < 2) continue;
+    ctx.beginPath(); ctx.strokeStyle = shape.color || '#231f20';
+    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath(); ctx.stroke();
+  }
+
+  // Draw control point handles when in select mode
+  if (tool === 'select') {
+    for (const shape of shapes) {
+      for (const pt of shape.points) {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.strokeStyle = shape.color || '#231f20'; ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+  }
 }
 
 function updateStatus() {
-  const totalPts = strokes.reduce((sum, s) => sum + s.points.length, 0);
-  document.getElementById('strokeCount').textContent = strokes.length;
+  const totalPts = strokes.reduce((sum, s) => sum + s.points.length, 0)
+    + shapes.reduce((sum, s) => sum + s.points.length, 0);
+  document.getElementById('strokeCount').textContent = strokes.length + shapes.length;
   document.getElementById('pointCount').textContent = totalPts;
 }
 
@@ -549,7 +668,7 @@ function flowText(grid, rows, cols) {
 // PREVIEW
 // ═══════════════════════════════════════════════
 function previewASCII() {
-  if (strokes.length === 0) { showToast('Draw something first'); return; }
+  if (strokes.length === 0 && shapes.length === 0) { showToast('Draw or add a shape first'); return; }
   const result = canvasToGrid();
   if (result.lines.length === 0) { showToast('Nothing detected — try lowering threshold'); return; }
 
@@ -571,7 +690,7 @@ function hidePreview() {
 // EXPORT ASCII SVG
 // ═══════════════════════════════════════════════
 function exportAsciiSVG() {
-  if (strokes.length === 0) { showToast('Draw something first'); return; }
+  if (strokes.length === 0 && shapes.length === 0) { showToast('Draw or add a shape first'); return; }
   const result = canvasToGrid();
   if (result.lines.length === 0) { showToast('Nothing detected'); return; }
 
@@ -605,7 +724,7 @@ function pdfEscape(s) {
 }
 
 function exportAsciiAI() {
-  if (strokes.length === 0) { showToast('Draw something first'); return; }
+  if (strokes.length === 0 && shapes.length === 0) { showToast('Draw or add a shape first'); return; }
   const result = canvasToGrid();
   if (result.lines.length === 0) { showToast('Nothing detected'); return; }
 
@@ -730,6 +849,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'z' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); undo(); }
   if (e.key === 'd') setTool('draw');
   if (e.key === 'e') setTool('erase');
+  if (e.key === 'v') setTool('select');
   if (e.key === 'p') previewASCII();
 });
 </script>
