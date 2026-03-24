@@ -364,6 +364,15 @@ function onPointerDown(e) {
         return;
       }
     }
+    // Priority 3: check if inside a photo for photo drag
+    for (let pi = photos.length - 1; pi >= 0; pi--) {
+      const p = photos[pi];
+      if (pos.x >= p.x && pos.x <= p.x + p.w && pos.y >= p.y && pos.y <= p.y + p.h) {
+        dragState = { photoIdx: pi, mode: 'photo', startX: pos.x, startY: pos.y,
+          origX: p.x, origY: p.y };
+        return;
+      }
+    }
     dragState = null;
     return;
   }
@@ -393,6 +402,10 @@ function onPointerMove(e) {
         pts[i].x = dragState.origPoints[i].x + dx;
         pts[i].y = dragState.origPoints[i].y + dy;
       }
+    } else if (dragState.mode === 'photo') {
+      const dx = pos.x - dragState.startX, dy = pos.y - dragState.startY;
+      photos[dragState.photoIdx].x = dragState.origX + dx;
+      photos[dragState.photoIdx].y = dragState.origY + dy;
     }
     redraw();
     return;
@@ -475,37 +488,32 @@ function setColor(hex, el) {
 function updateBrush() { brushSize = parseInt(document.getElementById('brushSize').value); document.getElementById('brushLabel').textContent = brushSize; }
 function updateSmoothing() { smoothLevel = parseInt(document.getElementById('smoothing').value); document.getElementById('smoothLabel').textContent = smoothLevel; }
 
+// Photo objects: { img, x, y, w, h }
+let photos = [];
+
 function loadPhoto(input) {
   if (!input.files || !input.files[0]) return;
   const file = input.files[0];
   const img = new Image();
   img.onload = function() {
-    // Clear existing content
-    strokes = []; shapes = []; actionHistory = []; dragState = null;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Scale image to fit canvas, maintaining aspect ratio
     const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
     const w = img.width * scale;
     const h = img.height * scale;
     const x = (canvas.width - w) / 2;
     const y = (canvas.height - h) / 2;
-    ctx.drawImage(img, x, y, w, h);
-
-    // Mark as having content so export checks pass
-    // Store as a special "photo" stroke so undo/status work
-    strokes.push({ points: [{x:0,y:0},{x:1,y:1}], color: '#000', size: 1, smoothed: [], isPhoto: true, imgData: ctx.getImageData(0, 0, canvas.width, canvas.height) });
-    actionHistory.push('stroke');
+    photos.push({ img, x, y, w, h });
+    actionHistory.push('photo');
+    setTool('select');
+    redraw();
     updateStatus();
-    showToast('Photo loaded — adjust Thresh and preview');
-    input.value = ''; // reset so same file can be re-selected
+    showToast('Photo loaded — drag to move, adjust Thresh and preview');
+    input.value = '';
   };
   img.src = URL.createObjectURL(file);
 }
 
 function clearCanvas() {
-  strokes = []; shapes = []; actionHistory = []; dragState = null;
+  strokes = []; shapes = []; photos = []; actionHistory = []; dragState = null;
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   updateStatus(); hidePreview();
@@ -516,6 +524,7 @@ function undo() {
   const last = actionHistory.pop();
   if (last === 'stroke') strokes.pop();
   else if (last === 'shape') shapes.pop();
+  else if (last === 'photo') photos.pop();
   redraw(); updateStatus();
 }
 
@@ -524,12 +533,13 @@ function redraw(showHandles) {
   ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#F4F3EC'; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw freehand strokes (and restore photos)
+  // Draw photos
+  for (const photo of photos) {
+    ctx.drawImage(photo.img, photo.x, photo.y, photo.w, photo.h);
+  }
+
+  // Draw freehand strokes
   for (const stroke of strokes) {
-    if (stroke.isPhoto) {
-      ctx.putImageData(stroke.imgData, 0, 0);
-      continue;
-    }
     const pts = stroke.smoothed.length > 0 ? stroke.smoothed : stroke.points;
     if (pts.length < 2) continue;
     ctx.beginPath(); ctx.strokeStyle = stroke.color || '#231f20';
@@ -787,7 +797,7 @@ function flowText(grid, rows, cols) {
 // PREVIEW
 // ═══════════════════════════════════════════════
 function previewASCII() {
-  if (strokes.length === 0 && shapes.length === 0) { showToast('Draw or add a shape first'); return; }
+  if (strokes.length === 0 && shapes.length === 0 && photos.length === 0) { showToast('Draw, add a shape, or upload a photo first'); return; }
   const result = canvasToGrid();
   if (result.lines.length === 0) { showToast('Nothing detected — try lowering threshold'); return; }
 
@@ -809,7 +819,7 @@ function hidePreview() {
 // EXPORT ASCII SVG
 // ═══════════════════════════════════════════════
 function exportAsciiSVG() {
-  if (strokes.length === 0 && shapes.length === 0) { showToast('Draw or add a shape first'); return; }
+  if (strokes.length === 0 && shapes.length === 0 && photos.length === 0) { showToast('Draw, add a shape, or upload a photo first'); return; }
   const result = canvasToGrid();
   if (result.lines.length === 0) { showToast('Nothing detected'); return; }
 
@@ -843,7 +853,7 @@ function pdfEscape(s) {
 }
 
 function exportAsciiAI() {
-  if (strokes.length === 0 && shapes.length === 0) { showToast('Draw or add a shape first'); return; }
+  if (strokes.length === 0 && shapes.length === 0 && photos.length === 0) { showToast('Draw, add a shape, or upload a photo first'); return; }
   const result = canvasToGrid();
   if (result.lines.length === 0) { showToast('Nothing detected'); return; }
 
