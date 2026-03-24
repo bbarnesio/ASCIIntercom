@@ -394,107 +394,104 @@ function canvasToGrid() {
   const imageData = ctx.getImageData(0, 0, w, h);
   const px = imageData.data;
 
-  // Determine grid size from page dimensions
-  const cols = Math.floor((PAGE_W - 2 * MARGIN) / CHAR_W);
+  // Helper: luminance at pixel (x, y)
+  function lum(x, y) {
+    const i = (y * w + x) * 4;
+    return 0.299 * px[i] + 0.587 * px[i+1] + 0.114 * px[i+2];
+  }
+
+  // Step 1: Find bounding box of dark pixels directly on the canvas
+  let pxMinX = w, pxMaxX = 0, pxMinY = h, pxMaxY = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (lum(x, y) < threshold) {
+        if (x < pxMinX) pxMinX = x;
+        if (x > pxMaxX) pxMaxX = x;
+        if (y < pxMinY) pxMinY = y;
+        if (y > pxMaxY) pxMaxY = y;
+      }
+    }
+  }
+
+  if (pxMaxX < pxMinX) return { lines: [], rows: 0, cols: 0 }; // empty
+
+  // Add 5% padding around content (in pixel space)
+  const contentW = pxMaxX - pxMinX + 1;
+  const contentH = pxMaxY - pxMinY + 1;
+  const padX = Math.max(4, Math.floor(contentW * 0.05));
+  const padY = Math.max(4, Math.floor(contentH * 0.05));
+  pxMinX = Math.max(0, pxMinX - padX); pxMaxX = Math.min(w - 1, pxMaxX + padX);
+  pxMinY = Math.max(0, pxMinY - padY); pxMaxY = Math.min(h - 1, pxMaxY + padY);
+
+  const bboxW = pxMaxX - pxMinX + 1;
+  const bboxH = pxMaxY - pxMinY + 1;
+
+  // Step 2: Compute output grid dimensions preserving aspect ratio
+  const outCols = Math.floor((PAGE_W - 2 * MARGIN) / CHAR_W);
   const maxRows = Math.floor((PAGE_H - 2 * MARGIN) / LINE_H);
+  // Content aspect in pixel space, corrected for character cell proportions
+  const contentAspect = (bboxH / bboxW) * (CHAR_W / LINE_H);
+  const outRows = Math.min(Math.floor(outCols * contentAspect), maxRows);
 
-  const cellW = w / cols;
-  const cellH = w / cols * (LINE_H / CHAR_W); // maintain aspect via char proportions
-  const rawRows = Math.min(Math.floor(h / cellH), maxRows);
+  if (outRows < 1) return { lines: [], rows: 0, cols: 0 };
 
-  // Threshold to grid
+  // Step 3: Block-average canvas pixels directly into the output grid
+  // Each output cell maps to a rectangular region of the bounding-box area
+  const cellPxW = bboxW / outCols;
+  const cellPxH = bboxH / outRows;
+
   const grid = [];
-  for (let gy = 0; gy < rawRows; gy++) {
-    grid[gy] = [];
-    for (let gx = 0; gx < cols; gx++) {
-      const x0 = Math.floor(gx * cellW);
-      const x1 = Math.floor((gx + 1) * cellW);
-      const y0 = Math.floor(gy * cellH);
-      const y1 = Math.min(Math.floor((gy + 1) * cellH), h);
+  for (let r = 0; r < outRows; r++) {
+    grid[r] = [];
+    const srcY0 = Math.floor(pxMinY + r * cellPxH);
+    const srcY1 = Math.min(Math.floor(pxMinY + (r + 1) * cellPxH), pxMaxY + 1);
+    for (let c = 0; c < outCols; c++) {
+      const srcX0 = Math.floor(pxMinX + c * cellPxW);
+      const srcX1 = Math.min(Math.floor(pxMinX + (c + 1) * cellPxW), pxMaxX + 1);
       let total = 0, count = 0;
-      for (let py = y0; py < y1; py++) {
-        for (let ppx = x0; ppx < x1; ppx++) {
-          const idx = (py * w + ppx) * 4;
-          const gray = 0.299 * px[idx] + 0.587 * px[idx+1] + 0.114 * px[idx+2];
-          total += gray; count++;
+      for (let py = srcY0; py < srcY1; py++) {
+        for (let ppx = srcX0; ppx < srcX1; ppx++) {
+          total += lum(ppx, py);
+          count++;
         }
       }
-      grid[gy][gx] = (total / Math.max(count, 1)) < threshold;
+      grid[r][c] = (total / Math.max(count, 1)) < threshold;
     }
   }
 
-  // Auto-fit: find bounding box of filled cells
-  let minR = rawRows, maxR = 0, minC = cols, maxC = 0;
-  for (let r = 0; r < rawRows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (grid[r][c]) {
-        if (r < minR) minR = r; if (r > maxR) maxR = r;
-        if (c < minC) minC = c; if (c > maxC) maxC = c;
-      }
-    }
-  }
-
-  if (maxR < minR) return { lines: [], rows: 0, cols: 0 }; // empty
-
-  // Add padding (5% of content size)
-  const padR = Math.max(2, Math.floor((maxR - minR) * 0.05));
-  const padC = Math.max(2, Math.floor((maxC - minC) * 0.05));
-  minR = Math.max(0, minR - padR); maxR = Math.min(rawRows - 1, maxR + padR);
-  minC = Math.max(0, minC - padC); maxC = Math.min(cols - 1, maxC + padC);
-
-  // Extract sub-grid
-  const cropRows = maxR - minR + 1;
-  const cropCols = maxC - minC + 1;
-  let cropped = [];
-  for (let r = minR; r <= maxR; r++) {
-    const row = [];
-    for (let c = minC; c <= maxC; c++) {
-      row.push(grid[r][c]);
-    }
-    cropped.push(row);
-  }
-
-  // Now scale cropped content to fill the output page
-  const outCols = Math.floor((PAGE_W - 2 * MARGIN) / CHAR_W);
-  const contentAspect = cropRows / cropCols;
-  const outRows = Math.min(Math.floor(outCols * contentAspect * (CHAR_W / LINE_H)), maxRows);
-
-  const scaledGrid = [];
-  for (let r = 0; r < outRows; r++) {
-    scaledGrid[r] = [];
-    for (let c = 0; c < outCols; c++) {
-      const srcR = Math.floor(r / outRows * cropRows);
-      const srcC = Math.floor(c / outCols * cropCols);
-      scaledGrid[r][c] = cropped[Math.min(srcR, cropRows - 1)][Math.min(srcC, cropCols - 1)];
-    }
-  }
-
-  // Apply thickness
+  // Apply thickness (expand filled cells downward)
   if (thickness > 1) {
+    // Work on a copy to avoid cascading expansion
+    const thickGrid = grid.map(row => [...row]);
     for (let r = 0; r < outRows; r++) {
       for (let c = 0; c < outCols; c++) {
-        if (scaledGrid[r][c]) {
+        if (grid[r][c]) {
           for (let dy = 1; dy < thickness; dy++) {
-            if (r + dy < outRows) scaledGrid[r + dy][c] = true;
+            if (r + dy < outRows) thickGrid[r + dy][c] = true;
           }
         }
       }
     }
+    for (let r = 0; r < outRows; r++) {
+      for (let c = 0; c < outCols; c++) {
+        grid[r][c] = thickGrid[r][c];
+      }
+    }
   }
 
-  // Outline mode
+  // Outline mode: keep only border cells
   if (mode === 'outline') {
     const outline = [];
     for (let r = 0; r < outRows; r++) {
       outline[r] = [];
       for (let c = 0; c < outCols; c++) {
-        if (!scaledGrid[r][c]) { outline[r][c] = false; continue; }
+        if (!grid[r][c]) { outline[r][c] = false; continue; }
         let isBorder = false;
         for (let dr = -1; dr <= 1 && !isBorder; dr++) {
           for (let dc = -1; dc <= 1 && !isBorder; dc++) {
             if (dr === 0 && dc === 0) continue;
             const nr = r + dr, nc = c + dc;
-            if (nr < 0 || nr >= outRows || nc < 0 || nc >= outCols || !scaledGrid[nr][nc]) isBorder = true;
+            if (nr < 0 || nr >= outRows || nc < 0 || nc >= outCols || !grid[nr][nc]) isBorder = true;
           }
         }
         outline[r][c] = isBorder;
@@ -503,7 +500,7 @@ function canvasToGrid() {
     return flowText(outline, outRows, outCols);
   }
 
-  return flowText(scaledGrid, outRows, outCols);
+  return flowText(grid, outRows, outCols);
 }
 
 function flowText(grid, rows, cols) {
