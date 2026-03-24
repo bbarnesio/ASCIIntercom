@@ -449,8 +449,11 @@ function canvasToGrid() {
 
   if (outRows < 1) return { lines: [], rows: 0, cols: 0 };
 
-  // Step 3: Block-average canvas pixels directly into the output grid
-  // Each output cell maps to a rectangular region of the bounding-box area
+  // Step 3: Sample canvas pixels into the output grid
+  // Each output cell maps to a rectangular region of the bounding-box area.
+  // Use min-luminance detection: if ANY pixel in the cell is dark, fill it.
+  // This ensures thin strokes (1-3px) register even when they only cross a
+  // small fraction of the cell area — block-averaging would dilute them away.
   const cellPxW = bboxW / outCols;
   const cellPxH = bboxH / outRows;
 
@@ -462,14 +465,14 @@ function canvasToGrid() {
     for (let c = 0; c < outCols; c++) {
       const srcX0 = Math.floor(pxMinX + c * cellPxW);
       const srcX1 = Math.min(Math.floor(pxMinX + (c + 1) * cellPxW), pxMaxX + 1);
-      let total = 0, count = 0;
+      let minLum = 255;
       for (let py = srcY0; py < srcY1; py++) {
         for (let ppx = srcX0; ppx < srcX1; ppx++) {
-          total += lum(ppx, py);
-          count++;
+          const l = lum(ppx, py);
+          if (l < minLum) minLum = l;
         }
       }
-      grid[r][c] = (total / Math.max(count, 1)) < threshold;
+      grid[r][c] = minLum < threshold;
     }
   }
 
