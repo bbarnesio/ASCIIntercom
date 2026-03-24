@@ -31,7 +31,7 @@
   /* ── Toolbar ── */
   .toolbar {
     display: flex; gap: 10px; margin-bottom: 12px; align-items: center;
-    flex-wrap: wrap; justify-content: center; max-width: 860px;
+    flex-wrap: wrap; justify-content: flex-start; max-width: 860px; width: 100%;
   }
   .toolbar .group {
     display: flex; gap: 4px; background: #1a1a1a; border-radius: 8px; padding: 4px;
@@ -64,7 +64,7 @@
   /* ── ASCII Settings ── */
   .ascii-settings {
     display: flex; gap: 10px; margin-bottom: 16px; align-items: center;
-    flex-wrap: wrap; justify-content: center; max-width: 860px;
+    flex-wrap: wrap; justify-content: flex-start; max-width: 860px; width: 100%;
   }
   .ascii-settings .group {
     display: flex; gap: 4px; background: #1a1a1a; border-radius: 8px; padding: 4px; align-items: center;
@@ -82,7 +82,8 @@
 
   /* ── Canvas + Preview ── */
   .workspace {
-    display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; justify-content: center;
+    display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; justify-content: flex-start;
+    max-width: 860px; width: 100%;
   }
   .canvas-wrap {
     background: #F4F3EC; border-radius: 4px;
@@ -114,7 +115,8 @@
 
   /* ── Status ── */
   .status {
-    margin-top: 14px; font-size: 11px; color: #444; text-align: center; letter-spacing: 0.5px;
+    margin-top: 14px; font-size: 11px; color: #444; text-align: left; letter-spacing: 0.5px;
+    max-width: 860px; width: 100%;
   }
   .status .sep { margin: 0 8px; }
   .status kbd {
@@ -143,7 +145,7 @@
 
 <header>
   <h1>ASCIINTERCOM</h1>
-  <p>Draw. Export. ASCII.</p>
+  <p>ASCI-Intercom.</p>
 </header>
 
 <!-- Drawing tools -->
