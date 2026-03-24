@@ -218,7 +218,7 @@
     </label>
   </div>
   <div class="group">
-    <label>Weight <input type="range" id="asciiThickness" min="0" max="6" value="1" oninput="document.getElementById('thickVal').textContent=this.value"> <span class="val" id="thickVal">1</span></label>
+    <label>Weight <input type="range" id="asciiThickness" min="1" max="20" value="1" oninput="document.getElementById('thickVal').textContent=this.value"> <span class="val" id="thickVal">1</span></label>
     <label>Thresh <input type="range" id="asciiThreshold" min="60" max="220" value="180" oninput="document.getElementById('threshVal').textContent=this.value"> <span class="val" id="threshVal">180</span></label>
   </div>
   <div class="group">
@@ -672,14 +672,15 @@ function canvasToGrid() {
   }
 
   // Apply weight — omnidirectional dilation
-  // Weight 0 = raw (hairline), 1+ = expand filled cells in all directions by N
-  if (thickness > 0) {
+  // Weight 1 = hairline (no dilation), each step adds 1 cell of expansion
+  const dilateN = thickness - 1;
+  if (dilateN > 0) {
     const dilated = grid.map(row => [...row]);
     for (let r = 0; r < outRows; r++) {
       for (let c = 0; c < outCols; c++) {
         if (grid[r][c]) {
-          for (let dr = -thickness; dr <= thickness; dr++) {
-            for (let dc = -thickness; dc <= thickness; dc++) {
+          for (let dr = -dilateN; dr <= dilateN; dr++) {
+            for (let dc = -dilateN; dc <= dilateN; dc++) {
               const nr = r + dr, nc = c + dc;
               if (nr >= 0 && nr < outRows && nc >= 0 && nc < outCols) {
                 dilated[nr][nc] = true;
