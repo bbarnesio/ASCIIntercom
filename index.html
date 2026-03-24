@@ -322,21 +322,42 @@ function addShape(type) {
   updateStatus();
 }
 
+// ── Hit testing — ray-casting point-in-polygon ──
+function pointInShape(pos, shape) {
+  const pts = shape.points;
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    if (((yi > pos.y) !== (yj > pos.y)) && (pos.x < (xj - xi) * (pos.y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 // ── Pointer events — routes to draw/erase or select ──
 function onPointerDown(e) {
   e.preventDefault();
   const pos = getPos(e);
 
   if (tool === 'select') {
-    // Check if clicking near a control point
+    // Priority 1: check control points
     for (let si = shapes.length - 1; si >= 0; si--) {
       for (let pi = 0; pi < shapes[si].points.length; pi++) {
         const pt = shapes[si].points[pi];
         const dx = pos.x - pt.x, dy = pos.y - pt.y;
         if (dx * dx + dy * dy < HANDLE_RADIUS * HANDLE_RADIUS) {
-          dragState = { shapeIdx: si, pointIdx: pi };
+          dragState = { shapeIdx: si, pointIdx: pi, mode: 'point' };
           return;
         }
+      }
+    }
+    // Priority 2: check if inside a shape (point-in-polygon) for whole-shape drag
+    for (let si = shapes.length - 1; si >= 0; si--) {
+      if (pointInShape(pos, shapes[si])) {
+        dragState = { shapeIdx: si, mode: 'move', startX: pos.x, startY: pos.y,
+          origPoints: shapes[si].points.map(p => ({ x: p.x, y: p.y })) };
+        return;
       }
     }
     dragState = null;
@@ -359,7 +380,16 @@ function onPointerMove(e) {
 
   if (tool === 'select') {
     if (!dragState) return;
-    shapes[dragState.shapeIdx].points[dragState.pointIdx] = { x: pos.x, y: pos.y };
+    if (dragState.mode === 'point') {
+      shapes[dragState.shapeIdx].points[dragState.pointIdx] = { x: pos.x, y: pos.y };
+    } else if (dragState.mode === 'move') {
+      const dx = pos.x - dragState.startX, dy = pos.y - dragState.startY;
+      const pts = shapes[dragState.shapeIdx].points;
+      for (let i = 0; i < pts.length; i++) {
+        pts[i].x = dragState.origPoints[i].x + dx;
+        pts[i].y = dragState.origPoints[i].y + dy;
+      }
+    }
     redraw();
     return;
   }
